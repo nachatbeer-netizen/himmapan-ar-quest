@@ -3,17 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Himmapan AR Quest</title>
+    <title>Tri-Consonant AR: Himmapan Quest</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
+        @import url('https://fonts.googleapis.com/css2?family=Mali:wght@400;700&display=swap');
+        body { margin: 0; overflow: hidden; background-color: #052e16; font-family: 'Mali', cursive; user-select: none; }
         #video-element { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; transform: scaleX(-1); }
         #ar-canvas { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 2; pointer-events: none; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; }
         .interactive { pointer-events: auto; }
+        /* เอฟเฟกต์เรืองแสงแบบป่าเวทมนตร์ */
+        .magic-glow-mid { box-shadow: 0 0 20px #059669; border-color: #34d399; }
+        .magic-glow-high { box-shadow: 0 0 20px #2563eb; border-color: #60a5fa; }
+        .magic-glow-low { box-shadow: 0 0 20px #db2777; border-color: #f472b6; }
     </style>
 </head>
 <body>
@@ -21,108 +27,312 @@
     <video id="video-element" autoplay playsinline></video>
     <canvas id="ar-canvas"></canvas>
     
-    <div id="ui-layer" class="flex flex-col justify-between p-6 h-screen">
-        <div class="flex justify-between items-start">
-            <div class="bg-white/90 p-4 rounded-2xl shadow-lg border-4 border-yellow-400">
-                <h1 class="text-xl font-bold text-teal-600">คะแนน: <span id="score-text">0</span></h1>
-                <p class="text-xs text-gray-500">ทำท่าจีบมือ (Pinch) เพื่อจับอักษร</p>
+    <div id="ui-layer" class="flex flex-col justify-between p-4 h-screen">
+        
+        <div class="flex justify-between items-center w-full gap-4">
+            <div class="bg-white/90 p-3 rounded-2xl shadow-xl border-4 border-yellow-400 min-w-[120px] text-center">
+                <span class="text-xs font-bold text-gray-500 block">คะแนนสะสม</span>
+                <span id="score-text" class="text-3xl font-bold text-emerald-600">0</span>
             </div>
-            <div id="status-box" class="bg-white/95 px-4 py-2 rounded-xl text-sm font-bold text-amber-600 border border-amber-300">
-                กำลังเปิดกล้องเวทมนตร์...
+            
+            <div class="bg-gradient-to-r from-emerald-600/90 to-teal-600/90 p-4 rounded-2xl shadow-2xl border-2 border-amber-300 text-center flex-1 max-w-xl">
+                <span class="text-amber-300 text-xs font-bold block mb-1">ภารกิจจากหนุมานน้อย 🐒</span>
+                <h2 id="question-text" class="text-white text-lg md:text-xl font-bold">กำลังเตรียมอักษรวิเศษ...</h2>
+            </div>
+
+            <div class="bg-white/90 p-3 rounded-2xl shadow-xl border-4 border-yellow-400 min-w-[120px] text-center">
+                <span class="text-xs font-bold text-gray-500 block">เวลาที่ใช้</span>
+                <span id="time-text" class="text-2xl font-bold text-amber-600">00:00</span>
             </div>
         </div>
 
-        <div class="flex justify-center mb-4 interactive">
-            <div class="bg-white/95 p-4 rounded-2xl shadow-2xl border-2 border-teal-400 flex flex-col gap-2 items-center">
-                <input id="player-name" type="text" placeholder="พิมพ์ชื่อจอมยุทธ์น้อย..." class="border-2 border-gray-300 p-2 rounded-xl text-center font-bold text-teal-700 focus:outline-none focus:border-teal-500">
-                <button onclick="sendScoreToSheet()" class="bg-gradient-to-r from-amber-500 to-yellow-400 text-white font-bold px-6 py-2 rounded-xl shadow-md">
-                    🏰 ส่งคะแนนเข้าพิภพศิลา (Google Sheets)
-                </button>
+        <div class="absolute right-4 top-28 flex flex-col items-center gap-2">
+            <div class="bg-amber-100/90 text-amber-900 px-3 py-1 rounded-full text-xs font-bold border border-amber-300 shadow animate-bounce">
+                หนุมานน้อย: <span id="mascot-bubble">ชูมือขึ้นมาเลย!</span>
+            </div>
+            <div id="hand-status" class="w-4 h-4 rounded-full bg-red-500 shadow-md"></div>
+        </div>
+
+        <div id="keyboard-overlay" class="absolute inset-0 bg-black/40 flex items-center justify-center interactive">
+            <div class="bg-gradient-to-b from-amber-100 to-amber-50 p-6 rounded-3xl shadow-2xl border-4 border-amber-500 max-w-md w-full text-center">
+                <h3 class="text-xl font-bold text-amber-800 mb-2">📜 ศิลาลงนามจอมยุทธ์น้อย</h3>
+                <p class="text-xs text-amber-700 mb-4">โปรดพิมพ์ชื่อของเจ้าก่อนเข้าสู่ป่าหิมพานต์</p>
+                <input id="player-name" type="text" readonly class="w-full p-3 rounded-xl bg-white border-2 border-amber-400 text-center font-bold text-lg text-amber-900 shadow-inner mb-4 focus:outline-none" placeholder="จิ้มแป้นพิมพ์ด้านล่าง...">
+                
+                <div class="grid grid-cols-6 gap-1 bg-amber-800/10 p-2 rounded-xl text-xs font-bold text-amber-900">
+                    <button onclick="pressKey('ก')" class="bg-white p-2 rounded shadow active:bg-amber-200">ก</button>
+                    <button onclick="pressKey('ข')" class="bg-white p-2 rounded shadow active:bg-amber-200">ข</button>
+                    <button onclick="pressKey('ค')" class="bg-white p-2 rounded shadow active:bg-amber-200">ค</button>
+                    <button onclick="pressKey('ง')" class="bg-white p-2 rounded shadow active:bg-amber-200">ง</button>
+                    <button onclick="pressKey('จ')" class="bg-white p-2 rounded shadow active:bg-amber-200">จ</button>
+                    <button onclick="pressKey('ด')" class="bg-white p-2 rounded shadow active:bg-amber-200">ด</button>
+                    <button onclick="pressKey('ต')" class="bg-white p-2 rounded shadow active:bg-amber-200">ต</button>
+                    <button onclick="pressKey('บ')" class="bg-white p-2 rounded shadow active:bg-amber-200">บ</button>
+                    <button onclick="pressKey('ป')" class="bg-white p-2 rounded shadow active:bg-amber-200">ป</button>
+                    <button onclick="pressKey('น')" class="bg-white p-2 rounded shadow active:bg-amber-200">น</button>
+                    <button onclick="pressKey('ม')" class="bg-white p-2 rounded shadow active:bg-amber-200">ม</button>
+                    <button onclick="pressKey('อ')" class="bg-white p-2 rounded shadow active:bg-amber-200">อ</button>
+                    <button onclick="pressKey('A')" class="bg-amber-200 p-2 rounded shadow active:bg-amber-300">A</button>
+                    <button onclick="pressKey('B')" class="bg-amber-200 p-2 rounded shadow active:bg-amber-300">B</button>
+                    <button onclick="pressKey('C')" class="bg-amber-200 p-2 rounded shadow active:bg-amber-300">C</button>
+                    <button onclick="pressKey('1')" class="bg-amber-100 p-2 rounded shadow active:bg-amber-200">1</button>
+                    <button onclick="pressKey('2')" class="bg-amber-100 p-2 rounded shadow active:bg-amber-200">2</button>
+                    <button onclick="pressKey('3')" class="bg-amber-100 p-2 rounded shadow active:bg-amber-200">3</button>
+                    <button onclick="pressKey('CLR')" class="col-span-3 bg-red-400 text-white p-2 rounded shadow active:bg-red-500">ลบ</button>
+                    <button onclick="startGame()" class="col-span-3 bg-emerald-500 text-white p-2 rounded shadow font-bold active:bg-emerald-600">เริ่มเล่น! 🎮</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-3 w-full interactive mb-2">
+            <div id="chest-high" class="bg-white/90 border-4 p-3 rounded-2xl text-center transition-all duration-200 magic-glow-high">
+                <span class="text-2xl block">💎</span>
+                <span class="font-bold text-blue-700 text-sm md:text-base">อักษรสูง</span>
+                <span class="text-[10px] text-gray-500 block mt-1">ข ฃ ฉ ถ ฐ ผ ฝ ศ ษ ส ห</span>
+            </div>
+            <div id="chest-mid" class="bg-white/90 border-4 p-3 rounded-2xl text-center transition-all duration-200 magic-glow-mid">
+                <span class="text-2xl block">👑</span>
+                <span class="font-bold text-emerald-700 text-sm md:text-base">อักษรกลาง</span>
+                <span class="text-[10px] text-gray-500 block mt-1">ก จ ด ต บ ป อ ฎ ฏ</span>
+            </div>
+            <div id="chest-low" class="bg-white/90 border-4 p-3 rounded-2xl text-center transition-all duration-200 magic-glow-low">
+                <span class="text-2xl block">🔥</span>
+                <span class="font-bold text-pink-700 text-sm md:text-base">อักษรต่ำ</span>
+                <span class="text-[10px] text-gray-500 block mt-1">ค ง ช ซ ท น พ ฟ ม ย ร ล ว ฮ...</span>
             </div>
         </div>
     </div>
 
     <script>
-        // ⚠️ วางลิงก์ Web App URL ของคุณที่ก๊อปปี้มาจาก Apps Script ตรงนี้ครับ!
-        const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycby7qCrErv0Hf7E3A3ERZj6XCI4XxsPZxZWkVPN8OTtUX1xJrKtzHgYvOnE0ZZ-Rj_sD_g/exec";
+        // ⚠️ วางลิงก์ Google Apps Script Web App ของคุณตรงนี้
+        const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzPA8CEU.../exec"; 
 
+        // ข้อมูลชุดคำศัพท์อักษรสามหมู่
+        const consonants = {
+            high: ['ข', 'ฉ', 'ถ', 'ฐ', 'ผ', 'ฝ', 'ศ', 'ษ', 'ส', 'ห'],
+            mid: ['ก', 'จ', 'ด', 'ต', 'บ', 'ป', 'อ'],
+            low: ['ค', 'ง', 'ช', 'ซ', 'ท', 'น', 'พ', 'ฟ', 'ภ', 'ม', 'ย', 'ร', 'ล', 'ว', 'ฮ']
+        };
+
+        let currentLetter = "";
+        let currentGroup = ""; 
+        let score = 0;
+        let playerName = "";
+        let startTime, timerInterval;
+        let gameActive = false;
+
+        // ดึงอิลิเมนต์ที่จำเป็น
         const videoElement = document.getElementById('video-element');
         const canvasElement = document.getElementById('ar-canvas');
-        const statusBox = document.getElementById('status-box');
         const scoreText = document.getElementById('score-text');
-        let currentScore = 0;
+        const questionText = document.getElementById('question-text');
+        const timeText = document.getElementById('time-text');
+        const mascotBubble = document.getElementById('mascot-bubble');
+        const handStatus = document.getElementById('hand-status');
 
-        // Three.js Setup
+        // --- ระบบเสียงวิทยาศาสตร์ (Web Audio API Synthesizer) ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSound(type) {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            if (type === 'grab') { // เสียงจีบจับวัตถุ (กรุ๊งกริ๊ง)
+                osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
+                osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.1); // A5
+                gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+            } else if (type === 'correct') { // เสียงตอบถูก (Happy Level up)
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
+                osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.1); // E5
+                osc.frequency.setValueAtTime(783.99, audioCtx.currentTime + 0.2); // G5
+                gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.4);
+            } else if (type === 'wrong') { // เสียงตอบผิด (ฆ้องแป่วว)
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(220, audioCtx.currentTime); // A3
+                osc.frequency.linearRampToValueAtTime(110, audioCtx.currentTime + 0.3); // A2
+                gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+            }
+        }
+
+        // --- ระบบแป้นพิมพ์เสมือนใบลาน ---
+        function pressKey(char) {
+            const input = document.getElementById('player-name');
+            if (char === 'CLR') { input.value = ""; }
+            else { input.value += char; }
+            playSound('grab');
+        }
+
+        function startGame() {
+            playerName = document.getElementById('player-name').value;
+            if(!playerName) { alert("กรุณาใส่ชื่อของเจ้าก่อนนะจ้า!"); return; }
+            document.getElementById('keyboard-overlay').style.display = 'none';
+            gameActive = true;
+            startTime = Date.now();
+            timerInterval = setInterval(updateTimer, 1000);
+            generateQuestion();
+        }
+
+        function updateTimer() {
+            let elapsed = Math.floor((Date.now() - startTime) / 1000);
+            let mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
+            let secs = String(elapsed % 60).padStart(2, '0');
+            timeText.innerText = `${mins}:${secs}`;
+            
+            // เมื่อเล่นครบ 10 ข้อ หรือครบกำหนด ให้ส่งเข้าชีต (ตัวอย่างทดสอบจบที่ 10 คะแนน)
+            if (score >= 10) {
+                endGame(elapsed);
+            }
+        }
+
+        // --- ระบบสุ่มคำถามอัจฉริยะแยกสีหมู่อักษร ---
+        function generateQuestion() {
+            const groups = ['high', 'mid', 'low'];
+            currentGroup = groups[Math.floor(Math.random() * groups.length)];
+            const list = consonants[currentGroup];
+            currentLetter = list[Math.floor(Math.random() * list.length)];
+            
+            questionText.innerText = `จงลากลูกบอลอักษร 「 ${currentLetter} 」 ไปใส่ในหีบที่ถูกต้อง!`;
+            mascotBubble.innerText = "ช่วยจับไปใส่หีบที!";
+            
+            // รีเซ็ตตำแหน่งลูกบอลเวทมนตร์มาอยู่ตรงกลางจอ
+            magicBall.position.set(0, 1, 0);
+        }
+
+        // --- โครงสร้างกราฟิก 3D (Three.js) ---
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ canvas: canvasElement, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         camera.position.z = 5;
 
-        const geometry = new THREE.SphereGeometry(0.6, 16, 16);
-        const material = new THREE.MeshBasicMaterial({ color: 0x00ffaa, wireframe: true });
+        // สร้างลูกบอลโครงตาข่ายนีออน (ตัวแทนดอกบัวเวทมนตร์)
+        const geometry = new THREE.SphereGeometry(0.5, 32, 32);
+        const material = new THREE.MeshBasicMaterial({ color: 0x34d399, wireframe: true });
         const magicBall = new THREE.Mesh(geometry, material);
         scene.add(magicBall);
 
-        // MediaPipe Hands Setup
+        // แสงสว่างเสริมความชัดเจน
+        const light = new THREE.AmbientLight(0xffffff, 1);
+        scene.add(light);
+
+        // --- ระบบ MediaPipe Hands (ตัวตามจับท่ามือ) ---
         const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
         hands.setOptions({ maxNumHands: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
 
-        let handPointer = { x: 0, y: 0, isPinching: false };
+        let handPointer = { x: 0, y: 0, isPinching: false, rawY: 0 };
+        let lastPinchState = false;
 
         hands.onResults((results) => {
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                statusBox.innerText = "✨ ตรวจพบมือแล้ว! ✨";
+                handStatus.className = "w-4 h-4 rounded-full bg-green-500 shadow-md";
                 const landmarks = results.multiHandLandmarks[0];
-                const distance = Math.hypot(landmarks[8].x - landmarks[4].x, landmarks[8].y - landmarks[4].y);
-                handPointer.isPinching = distance < 0.05; 
-                handPointer.x = (1 - landmarks[8].x) * 2 - 1; 
-                handPointer.y = -(landmarks[8].y * 2 - 1);
+                
+                const indexFinger = landmarks[8];
+                const thumb = landmarks[4];
+                
+                // คำนวณนิ้วจีบจับ
+                const distance = Math.hypot(indexFinger.x - thumb.x, indexFinger.y - thumb.y);
+                handPointer.isPinching = distance < 0.06;
+                
+                // อัปเดตพิกัดอิงแกน 3D
+                handPointer.x = (1 - indexFinger.x) * 10 - 5; 
+                handPointer.y = -(indexFinger.y * 6 - 3);
+                handPointer.rawY = indexFinger.y; // เก็บค่าแกน Y ดิบไว้เช็คโซ่กล่องด้านล่าง
+                
+                if (handPointer.isPinching && !lastPinchState) {
+                    playSound('grab');
+                    mascotBubble.innerText = "จับแน่นๆ เลยจ้า!";
+                }
+                lastPinchState = handPointer.isPinching;
             } else {
-                statusBox.innerText = "👋 ชูมือขึ้นมาหน้ากล้องเลย";
+                handStatus.className = "w-4 h-4 rounded-full bg-red-500 shadow-md";
                 handPointer.isPinching = false;
+                lastPinchState = false;
             }
         });
 
+        // เปิดรันกล้อง
         const cameraUtils = new Camera(videoElement, {
             onFrame: async () => { await hands.send({image: videoElement}); },
             width: 1280, height: 720
         });
-        cameraUtils.start().then(() => { statusBox.innerText = "กล้องพร้อมใช้งาน!"; });
+        cameraUtils.start();
 
-        function gameLoop() {
-            requestAnimationFrame(gameLoop);
+        // --- ลูปการทำงานของกลไกเกม (Game Loop) ---
+        function animate() {
+            requestAnimationFrame(animate);
             magicBall.rotation.y += 0.02;
-            if (handPointer.isPinching) {
-                magicBall.position.x += (handPointer.x * 5 - magicBall.position.x) * 0.1;
-                magicBall.position.y += (handPointer.y * 5 - magicBall.position.y) * 0.1;
-                magicBall.material.color.setHex(0xffd700);
-                currentScore += 1;
-                scoreText.innerText = currentScore;
-            } else {
-                magicBall.material.color.setHex(0x00ffaa);
+            magicBall.rotation.x += 0.01;
+
+            if (gameActive) {
+                if (handPointer.isPinching) {
+                    // ลูกบอลวิเศษเคลื่อนที่ตามมือนักเรียนแบบ Real-time
+                    magicBall.position.x += (handPointer.x - magicBall.position.x) * 0.2;
+                    magicBall.position.y += (handPointer.y - magicBall.position.y) * 0.2;
+                    magicBall.material.color.setHex(0xfbbf24); // เปลี่ยนเป็นสีทองคำเมื่อโดนจับ
+                    
+                    // 🌟 ตรวจจับการชนเมื่อลากลูกบอลลงกล่องด้านล่าง (เช็คจากพิกัดหน้าจอ Y > 0.7)
+                    if (handPointer.rawY > 0.72) {
+                        let chosenGroup = "";
+                        // แบ่งเขตหน้าจอซ้าย-กลาง-ขวา (X พิกัด)
+                        if (handPointer.x < -1.5) { chosenGroup = "high"; }
+                        else if (handPointer.x > 1.5) { chosenGroup = "low"; }
+                        else { chosenGroup = "mid"; }
+                        
+                        // ตรวจสอบความถูกต้องของการใส่กล่อง
+                        if (chosenGroup === currentGroup) {
+                            score += 1;
+                            scoreText.innerText = score;
+                            playSound('correct');
+                            mascotBubble.innerText = "เก่งมาก! ถูกต้องแล้ว";
+                            generateQuestion();
+                        } else {
+                            playSound('wrong');
+                            mascotBubble.innerText = "ฮึบใหม่! กล่องนั้นยังไม่ถูกนะ";
+                            magicBall.position.set(0, 1, 0); // เด้งกลับจุดเริ่มต้น
+                            handPointer.isPinching = false;
+                        }
+                    }
+                } else {
+                    // หากไม่ได้จับ ลูกบอลจะลอยแกว่งไปมากลางอากาศแบบน่ารักๆ
+                    magicBall.material.color.setHex(0x34d399);
+                    magicBall.position.y = 0.5 + Math.sin(Date.now() * 0.003) * 0.2;
+                }
             }
             renderer.render(scene, camera);
         }
-        gameLoop();
+        animate();
 
-        // ฟังก์ชันยิงคะแนนเข้า Google Sheets ผ่าน Fetch API
-        function sendScoreToSheet() {
-            const name = document.getElementById('player-name').value;
-            if(!name) { alert("กรุณาใส่ชื่อก่อนนะขอรับ!"); return; }
+        // --- ระบบส่งผลสถิติอัจฉริยะผ่าน Google Apps Script ---
+        function endGame(totalTime) {
+            gameActive = false;
+            clearInterval(timerInterval);
+            questionText.innerText = "🎉 ภารกิจสำเร็จ! กำลังจารึกสถิติลงแผ่นศิลา...";
             
-            statusBox.innerText = "กำลังส่งคะแนน...";
+            let finalTimeStr = timeText.innerText;
             
             fetch(GAS_WEB_APP_URL, {
                 method: "POST",
-                mode: "no-cors", // ปลดล็อกเรื่อง Cross-Origin ของเบราว์เซอร์
+                mode: "no-cors",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: name, score: currentScore, timeUsed: "01:30" })
+                body: JSON.stringify({ name: playerName, score: score, timeUsed: finalTimeStr })
             }).then(() => {
-                alert("ส่งคะแนนเข้า Google Sheets สำเร็จแล้ว!");
-                statusBox.innerText = "บันทึกข้อมูลเรียบร้อย!";
+                alert(`ยินดีด้วยคุณ ${playerName}! บันทึกสถิติสำเร็จ\nทำคะแนนได้: ${score} คะแนน\nเวลาที่ใช้: ${finalTimeStr}`);
+                // รีเซ็ตกลับหน้าแรก
+                score = 0;
+                scoreText.innerText = 0;
+                document.getElementById('keyboard-overlay').style.display = 'flex';
+                document.getElementById('player-name').value = "";
             }).catch(err => {
-                alert("เกิดข้อผิดพลาด: " + err);
+                alert("เกิดข้อผิดพลาดในการเชื่อมต่อสเปรดชีต: " + err);
             });
         }
     </script>

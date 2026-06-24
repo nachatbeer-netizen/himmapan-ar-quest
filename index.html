@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Himmapan AR Quest</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
+        #video-element { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; transform: scaleX(-1); }
+        #ar-canvas { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 2; pointer-events: none; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; }
+        .interactive { pointer-events: auto; }
+    </style>
+</head>
+<body>
+
+    <video id="video-element" autoplay playsinline></video>
+    <canvas id="ar-canvas"></canvas>
+    
+    <div id="ui-layer" class="flex flex-col justify-between p-6 h-screen">
+        <div class="flex justify-between items-start">
+            <div class="bg-white/90 p-4 rounded-2xl shadow-lg border-4 border-yellow-400">
+                <h1 class="text-xl font-bold text-teal-600">คะแนน: <span id="score-text">0</span></h1>
+                <p class="text-xs text-gray-500">ทำท่าจีบมือ (Pinch) เพื่อจับอักษร</p>
+            </div>
+            <div id="status-box" class="bg-white/95 px-4 py-2 rounded-xl text-sm font-bold text-amber-600 border border-amber-300">
+                กำลังเปิดกล้องเวทมนตร์...
+            </div>
+        </div>
+
+        <div class="flex justify-center mb-4 interactive">
+            <div class="bg-white/95 p-4 rounded-2xl shadow-2xl border-2 border-teal-400 flex flex-col gap-2 items-center">
+                <input id="player-name" type="text" placeholder="พิมพ์ชื่อจอมยุทธ์น้อย..." class="border-2 border-gray-300 p-2 rounded-xl text-center font-bold text-teal-700 focus:outline-none focus:border-teal-500">
+                <button onclick="sendScoreToSheet()" class="bg-gradient-to-r from-amber-500 to-yellow-400 text-white font-bold px-6 py-2 rounded-xl shadow-md">
+                    🏰 ส่งคะแนนเข้าพิภพศิลา (Google Sheets)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ⚠️ วางลิงก์ Web App URL ของคุณที่ก๊อปปี้มาจาก Apps Script ตรงนี้ครับ!
+        const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycby7qCrErv0Hf7E3A3ERZj6XCI4XxsPZxZWkVPN8OTtUX1xJrKtzHgYvOnE0ZZ-Rj_sD_g/exec";
+
+        const videoElement = document.getElementById('video-element');
+        const canvasElement = document.getElementById('ar-canvas');
+        const statusBox = document.getElementById('status-box');
+        const scoreText = document.getElementById('score-text');
+        let currentScore = 0;
+
+        // Three.js Setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ canvas: canvasElement, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        camera.position.z = 5;
+
+        const geometry = new THREE.SphereGeometry(0.6, 16, 16);
+        const material = new THREE.MeshBasicMaterial({ color: 0x00ffaa, wireframe: true });
+        const magicBall = new THREE.Mesh(geometry, material);
+        scene.add(magicBall);
+
+        // MediaPipe Hands Setup
+        const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+        hands.setOptions({ maxNumHands: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+
+        let handPointer = { x: 0, y: 0, isPinching: false };
+
+        hands.onResults((results) => {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                statusBox.innerText = "✨ ตรวจพบมือแล้ว! ✨";
+                const landmarks = results.multiHandLandmarks[0];
+                const distance = Math.hypot(landmarks[8].x - landmarks[4].x, landmarks[8].y - landmarks[4].y);
+                handPointer.isPinching = distance < 0.05; 
+                handPointer.x = (1 - landmarks[8].x) * 2 - 1; 
+                handPointer.y = -(landmarks[8].y * 2 - 1);
+            } else {
+                statusBox.innerText = "👋 ชูมือขึ้นมาหน้ากล้องเลย";
+                handPointer.isPinching = false;
+            }
+        });
+
+        const cameraUtils = new Camera(videoElement, {
+            onFrame: async () => { await hands.send({image: videoElement}); },
+            width: 1280, height: 720
+        });
+        cameraUtils.start().then(() => { statusBox.innerText = "กล้องพร้อมใช้งาน!"; });
+
+        function gameLoop() {
+            requestAnimationFrame(gameLoop);
+            magicBall.rotation.y += 0.02;
+            if (handPointer.isPinching) {
+                magicBall.position.x += (handPointer.x * 5 - magicBall.position.x) * 0.1;
+                magicBall.position.y += (handPointer.y * 5 - magicBall.position.y) * 0.1;
+                magicBall.material.color.setHex(0xffd700);
+                currentScore += 1;
+                scoreText.innerText = currentScore;
+            } else {
+                magicBall.material.color.setHex(0x00ffaa);
+            }
+            renderer.render(scene, camera);
+        }
+        gameLoop();
+
+        // ฟังก์ชันยิงคะแนนเข้า Google Sheets ผ่าน Fetch API
+        function sendScoreToSheet() {
+            const name = document.getElementById('player-name').value;
+            if(!name) { alert("กรุณาใส่ชื่อก่อนนะขอรับ!"); return; }
+            
+            statusBox.innerText = "กำลังส่งคะแนน...";
+            
+            fetch(GAS_WEB_APP_URL, {
+                method: "POST",
+                mode: "no-cors", // ปลดล็อกเรื่อง Cross-Origin ของเบราว์เซอร์
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: name, score: currentScore, timeUsed: "01:30" })
+            }).then(() => {
+                alert("ส่งคะแนนเข้า Google Sheets สำเร็จแล้ว!");
+                statusBox.innerText = "บันทึกข้อมูลเรียบร้อย!";
+            }).catch(err => {
+                alert("เกิดข้อผิดพลาด: " + err);
+            });
+        }
+    </script>
+</body>
+</html>
